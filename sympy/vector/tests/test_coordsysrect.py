@@ -1,7 +1,7 @@
 from sympy.testing.pytest import raises
 from sympy.vector.coordsysrect import CoordSys3D
 from sympy.vector.operators import gradient
-from sympy.vector.scalar import BaseScalar
+from sympy.vector.scalar import BaseScalar, BaseScalarFuncOfTime
 from sympy.core.function import expand, Function
 from sympy.core.numbers import pi
 from sympy.core.symbol import symbols
@@ -301,12 +301,27 @@ def test_locatenew_point():
 
 def test_create_new():
     a = CoordSys3D('a')
-    c = a.create_new('c', transformation='spherical')
-    assert c._parent == a
-    assert c.transformation_to_parent() == \
-           (c.r*sin(c.theta)*cos(c.phi), c.r*sin(c.theta)*sin(c.phi), c.r*cos(c.theta))
-    assert c.transformation_from_parent() == \
-           (sqrt(a.x**2 + a.y**2 + a.z**2), acos(a.z/sqrt(a.x**2 + a.y**2 + a.z**2)), atan2(a.y, a.x))
+
+    C1 = a.create_new("C1", transformation="cartesian")
+    assert C1.parent == a
+    assert C1.transformation_to_parent() == (C1.x, C1.y, C1.z)
+    assert C1.transformation_from_parent() == (a.x, a.y, a.z)
+
+    C2 = a.create_new("C2", transformation=lambda x,y,z: (x,y,z))
+    assert C2.parent == a
+    assert C2.transformation_to_parent() == (C2.x1, C2.x2, C2.x3)
+    assert C2.transformation_from_parent() == (a.x, a.y, a.z)
+
+    C3 = a.create_new('C3', transformation='spherical')
+    assert C3.parent == a
+    assert C3.transformation_to_parent() == \
+           (C3.r*sin(C3.theta)*cos(C3.phi),
+           C3.r*sin(C3.theta)*sin(C3.phi),
+           C3.r*cos(C3.theta))
+    assert C3.transformation_from_parent() == \
+           (sqrt(a.x**2 + a.y**2 + a.z**2),
+           acos(a.z/sqrt(a.x**2 + a.y**2 + a.z**2)),
+           atan2(a.y, a.x))
 
 
 def test_evalf():
@@ -321,10 +336,17 @@ def test_lame_coefficients():
     assert a.lame_coefficients() == (1, a.r, sin(a.theta)*a.r)
     a = CoordSys3D('a')
     assert a.lame_coefficients() == (1, 1, 1)
+    a = CoordSys3D('a', transformation=lambda x,y,z: (x, y, z))
+    assert a.lame_coefficients() == (1, 1, 1)
     a = CoordSys3D('a', 'cartesian')
     assert a.lame_coefficients() == (1, 1, 1)
     a = CoordSys3D('a', 'cylindrical')
     assert a.lame_coefficients() == (1, a.r, 1)
+    a = CoordSys3D('a', transformation=lambda r, theta, z: (
+        r * cos(theta), r * sin(theta), z),
+        variable_names=["r", "theta", "z"])
+    coeffs = tuple(c.simplify() for c in a.lame_coefficients())
+    assert coeffs == (1, sqrt(a.r**2), 1)  # ==> this should simplify to (1, r, 1)
 
 
 def test_transformation_equations():
@@ -376,7 +398,6 @@ def test_transformation_equations():
     # Cartesian with equation tuple:
     x, y, z = symbols('x y z')
     a = CoordSys3D('a', ((x, y, z), (x, y, z)))
-    a._calculate_inv_trans_equations()
     assert a.transformation_to_parent() == (a.x1, a.x2, a.x3)
     assert a.lame_coefficients() == (1, 1, 1)
     assert a.transformation_from_parent_function()(x, y, z) == (x, y, z)
@@ -401,7 +422,6 @@ def test_transformation_equations():
     a = CoordSys3D('a', lambda x, y, z: (x, y, z))
     assert a.transformation_to_parent() == (a.x1, a.x2, a.x3)
     assert a.lame_coefficients() == (1, 1, 1)
-    a._calculate_inv_trans_equations()
     assert a.transformation_from_parent_function()(x, y, z) == (x, y, z)
 
     # Spherical with `lambda`
@@ -438,11 +458,11 @@ def test_check_orthogonality():
     x, y, z = symbols('x y z')
     u,v = symbols('u, v')
     a = CoordSys3D('a', transformation=((x, y, z), (x*sin(y)*cos(z), x*sin(y)*sin(z), x*cos(y))))
-    assert a._check_orthogonality(a._transformation) is True
+    assert a._check_orthogonality(a.transformation) is True
     a = CoordSys3D('a', transformation=((x, y, z), (x * cos(y), x * sin(y), z)))
-    assert a._check_orthogonality(a._transformation) is True
+    assert a._check_orthogonality(a.transformation) is True
     a = CoordSys3D('a', transformation=((u, v, z), (cosh(u) * cos(v), sinh(u) * sin(v), z)))
-    assert a._check_orthogonality(a._transformation) is True
+    assert a._check_orthogonality(a.transformation) is True
 
     raises(ValueError, lambda: CoordSys3D('a', transformation=((x, y, z), (x, x, z))))
     raises(ValueError, lambda: CoordSys3D('a', transformation=(
@@ -770,3 +790,14 @@ def test_issue_28727():
     result = expr.simplify()
     expected = S.r**2*sin(S.theta)**2
     assert simplify(result - expected) == 0
+
+
+def test_base_scalar_func_of_time():
+    t = symbols("t")
+    C1 = CoordSys3D("C", time_symbol=None)
+    C2 = CoordSys3D("C", time_symbol=t)
+    assert C1 != C2
+    assert all(isinstance(s, BaseScalar) for s in C1.base_scalars())
+    assert all(not isinstance(s, BaseScalarFuncOfTime) for s in C1.base_scalars())
+    assert all(isinstance(s, BaseScalarFuncOfTime) for s in C2.base_scalars())
+    assert all(not isinstance(s, BaseScalar) for s in C2.base_scalars())
