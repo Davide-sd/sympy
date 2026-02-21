@@ -1,9 +1,10 @@
 from __future__ import annotations
 from itertools import product
 
-from sympy.core import Add, Mul, Basic
+from sympy.core import Add, Mul, Basic, Lambda, symbols, Dummy, Tuple
 from sympy.core.assumptions import StdFactKB
 from sympy.core.expr import AtomicExpr, Expr
+from sympy.core.function import Derivative
 from sympy.core.power import Pow
 from sympy.core.singleton import S
 from sympy.core.sorting import default_sort_key
@@ -13,6 +14,7 @@ from sympy.matrices.immutable import ImmutableDenseMatrix as Matrix
 from sympy.vector.basisdependent import (BasisDependentZero,
     BasisDependent, BasisDependentMul, BasisDependentAdd)
 from sympy.vector.coordsysrect import CoordSys3D
+from sympy.vector.coordsys_templates import _get_coordsys_template
 from sympy.vector.dyadic import Dyadic, BaseDyadic, DyadicAdd
 from sympy.vector.kind import VectorKind
 
@@ -449,16 +451,18 @@ class BaseVector(Vector, AtomicExpr):
         if index not in range(0, 3):
             raise ValueError("index must be 0, 1 or 2")
         if not isinstance(system, CoordSys3D):
-            raise TypeError("system should be a CoordSys3D")
-        name = system._vector_names[index]
+            raise TypeError(
+                "`system` should be a CoordSys3D. Instead, type"
+                f" '{type(system).__name__}' was received.")
+        name = system.vector_names[index]
         # Initialize an object
         obj = super().__new__(cls, S(index), system)
         # Assign important attributes
         obj._base_instance = obj
         obj._components = {obj: S.One}
         obj._measure_number = S.One
-        obj._name = system._name + '.' + name
-        obj._pretty_form = '' + pretty_str
+        obj._name = system.name + '.' + name
+        obj._pretty_form = pretty_str
         obj._latex_form = latex_str
         obj._system = system
         # The _id is used for printing purposes
@@ -475,14 +479,18 @@ class BaseVector(Vector, AtomicExpr):
 
     @property
     def system(self):
-        return self._system
+        return self.args[1]
+
+    @property
+    def index(self):
+        return self.args[0]
 
     def _sympystr(self, printer):
         return self._name
 
     def _sympyrepr(self, printer):
         index, system = self._id
-        return printer._print(system) + '.' + system._vector_names[index]
+        return printer._print(system) + '.' + system.vector_names[index]
 
     @property
     def free_symbols(self):
@@ -490,6 +498,57 @@ class BaseVector(Vector, AtomicExpr):
 
     def _eval_conjugate(self):
         return self
+
+    def _eval_derivative(self, wrt):
+        print("BaseVector._eval_derivative", wrt, type(wrt))
+        if self.system.time_symbol == wrt:
+            print("wtf")
+        return self.diff(wrt)
+
+    def _eval_derivative_n_times(self, *args, **kwargs):
+        print("BaseVector._eval_derivative_n_times", self, args, kwargs)
+        return super()._eval_derivative_n_times(*args, **kwargs)
+
+    def diff(self, *args, **kwargs):
+        d = Derivative(self, *args)
+        t = self.system.time_symbol
+        if (t is not None) and (len(set(d.variables)) == 1) and d.variables[0] == t:
+            index, system = self.args
+            tr = system.transformation
+            if isinstance(tr, str):
+                template = _get_coordsys_template(tr)
+                dt_funcs = template.base_vector_time_derivative
+                if dt_funcs is not None:
+                    dt_expr = dt_funcs[index](
+                        t, *system.base_scalars(), *system.base_vectors())
+                    for i in range(1, d.args[1][1]):
+                        dt_expr = dt_expr.diff(t)
+                    return dt_expr
+                return self._diff_helper(*args, **kwargs)
+            else:
+                return self._diff_helper(*args, **kwargs)
+
+        return Vector.zero
+
+    def _diff_helper(self, *args, **kwargs):
+        if self.system._is_cartesian:
+            return Vector.zero
+        if self.system.parent is None:
+            # for curvilinear system the parent system is required
+            raise ValueError(
+                f"Coordinate system `{self.system.name}` must have"
+                " a parent system.")
+
+        # Delayed import to avoid cyclic import problems:
+        from sympy.vector.functions import express
+
+        # express base vectors in a cartesian form
+        basevec_parent = express(self, self.system.parent)
+        # differentiate it
+        basevec_parent = basevec_parent.diff(*args, **kwargs)
+        # express it to the original system
+        basevec_parent = express(basevec_parent, self.system)
+        return basevec_parent
 
 
 class VectorAdd(BasisDependentAdd, Vector):

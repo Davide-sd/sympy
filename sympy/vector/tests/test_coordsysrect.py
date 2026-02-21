@@ -2,20 +2,23 @@ from sympy.testing.pytest import raises
 from sympy.vector.coordsysrect import CoordSys3D
 from sympy.vector.operators import gradient
 from sympy.vector.scalar import BaseScalar, BaseScalarFuncOfTime
-from sympy.core.function import expand, Function
+from sympy.core.function import expand, Function, Derivative
 from sympy.core.numbers import pi
 from sympy.core.symbol import symbols
 from sympy.functions.elementary.hyperbolic import (cosh, sinh)
 from sympy.functions.elementary.miscellaneous import sqrt
-from sympy.functions.elementary.trigonometric import (acos, atan2, cos, sin)
+from sympy.functions.elementary.trigonometric import (
+    acos, atan2, cos, sin, tan)
 from sympy.matrices.dense import zeros, eye
 from sympy.matrices.immutable import ImmutableDenseMatrix as Matrix
 from sympy.simplify.simplify import simplify
 from sympy.vector.functions import express
 from sympy.vector.point import Point
-from sympy.vector.vector import Vector
+from sympy.vector.vector import Vector, BaseVector
 from sympy.vector.orienters import (AxisOrienter, BodyOrienter,
                                     SpaceOrienter, QuaternionOrienter)
+from sympy.simplify.fu import TR5, TR6, TR11
+import pytest
 
 
 x, y, z = symbols('x y z')
@@ -792,12 +795,252 @@ def test_issue_28727():
     assert simplify(result - expected) == 0
 
 
-def test_base_scalar_func_of_time():
+@pytest.mark.parametrize("transformation", [
+    "cartesian", "spherical", "cylindrical"
+])
+def test_base_scalar_func_of_time(transformation):
     t = symbols("t")
-    C1 = CoordSys3D("C", time_symbol=None)
-    C2 = CoordSys3D("C", time_symbol=t)
+    C1 = CoordSys3D("C", transformation=transformation, time_symbol=None)
+    C2 = CoordSys3D("C", transformation=transformation, time_symbol=t)
+
     assert C1 != C2
+    assert C1.time_symbol is None
+    assert C2.time_symbol == t
+
     assert all(isinstance(s, BaseScalar) for s in C1.base_scalars())
     assert all(not isinstance(s, BaseScalarFuncOfTime) for s in C1.base_scalars())
+    assert all(t.system == C1 for t in C1.base_scalars())
+    assert all(s.diff(t) == 0 for s in C1.base_scalars())
+
     assert all(isinstance(s, BaseScalarFuncOfTime) for s in C2.base_scalars())
     assert all(not isinstance(s, BaseScalar) for s in C2.base_scalars())
+    assert all(s.diff(t) == Derivative(s, t) for s in C2.base_scalars())
+    assert all(s.diff(t, 2) == Derivative(s, (t, 2)) for s in C2.base_scalars())
+    assert all(t.system == C2 for t in C2.base_scalars())
+
+    x2, y2, z2 = C2.base_scalars()
+    assert x2 == getattr(C2, C2.variable_names[0])
+    assert y2 == getattr(C2, C2.variable_names[1])
+    assert z2 == getattr(C2, C2.variable_names[2])
+
+    assert x2 == BaseScalarFuncOfTime(0, C2, t)
+    assert y2 == BaseScalarFuncOfTime(1, C2, t)
+    assert z2 == BaseScalarFuncOfTime(2, C2, t)
+    t2 = symbols("t2")
+    assert x2 != BaseScalarFuncOfTime(0, C2, t2)
+    assert y2 != BaseScalarFuncOfTime(1, C2, t2)
+    assert z2 != BaseScalarFuncOfTime(2, C2, t2)
+
+    assert x2.func(*x2.args) == x2
+    assert y2.func(*y2.args) == y2
+    assert z2.func(*z2.args) == z2
+
+
+def test_cartesian_system_base_vector_derivative_of_time():
+    # cartesian base vector don't depend from the position, so their
+    # time derivative is always zero.
+
+    t = symbols("t")
+
+    # no parent, no time symbol
+    A = CoordSys3D("N")
+    assert all(s.diff(t) == 0 for s in A.base_scalars())
+    assert all(v.diff(t) == Vector.zero for v in A.base_vectors())
+
+    # no parent, with time symbol
+    B = CoordSys3D("B", time_symbol=t)
+    assert all(s.diff(t) != 0 for s in B.base_scalars())
+    assert all(v.diff(t) == Vector.zero for v in B.base_vectors())
+
+    # new system from a parent system, with time symbol
+    C = B.create_new("C", transformation="cartesian", time_symbol=t)
+    assert all(s.diff(t) != 0 for s in C.base_scalars())
+    assert all(v.diff(t) == Vector.zero for v in C.base_vectors())
+
+
+def test_cylindrical_system_base_vector_derivative_of_time():
+    t = symbols("t")
+
+    # using a predefined transformation - no time symbol
+    C0 = CoordSys3D("C0", transformation="cylindrical")
+    assert all(s.diff(t) == 0 for s in C0.base_scalars())
+    assert all(v.diff(t) == Vector.zero for v in C0.base_vectors())
+
+    # using a predefined transformation with time symbol
+    C1 = CoordSys3D("C1", transformation="cylindrical", time_symbol=t)
+    assert all(s.diff(t) != 0 for s in C1.base_scalars())
+    r, theta, z = C1.base_scalars()
+    e_r, e_theta, e_z = C1.base_vectors()
+
+    # first time derivative
+    assert e_r.diff(t) == theta.diff(t) * e_theta
+    assert e_theta.diff(t) == -theta.diff(t) * e_r
+    assert e_z.diff(t) == Vector.zero
+
+    # second time derivative
+    assert e_r.diff(t, 2) == theta.diff(t, 2) * e_theta - theta.diff(t)**2 * e_r
+    assert e_theta.diff(t, 2) == -theta.diff(t, 2) * e_r - theta.diff(t)**2 * e_theta
+    assert e_z.diff(t, 2) == Vector.zero
+
+    # using a lambda transformation
+    # no parent system, no time symbol
+    C2 = CoordSys3D(
+        "C2",
+        transformation=lambda r, theta, z: (
+            r*cos(theta),
+            r*sin(theta),
+            z),
+        time_symbol=None)
+    assert all(s.diff(t) == 0 for s in C2.base_scalars())
+    assert all(v.diff(t) == Vector.zero for v in C2.base_vectors())
+
+    # using a lambda transformation
+    # no system, with time symbol
+    C3 = CoordSys3D(
+        "C3",
+        transformation=lambda r, theta, z: (
+            r*cos(theta),
+            r*sin(theta),
+            z),
+        time_symbol=t)
+    assert all(s.diff(t) != 0 for s in C3.base_scalars())
+    e_r3, e_theta3, e_phi3 = C3.base_vectors()
+    # raise error because there is no parent system
+    raises(ValueError, lambda: e_r3.diff(t))
+    raises(ValueError, lambda: e_theta3.diff(t))
+    raises(ValueError, lambda: e_phi3.diff(t))
+
+    # using a lambda transformation
+    # with parent system and with time symbol
+    Cart = CoordSys3D("Cart")
+    C4 = Cart.create_new(
+        "C4",
+        transformation=lambda r, theta, z: (
+            r*cos(theta),
+            r*sin(theta),
+            z),
+        time_symbol=t)
+    assert all(s.diff(t) != 0 for s in C4.base_scalars())
+    r4, theta4, z4 = C4.base_scalars()
+    e_r4, e_theta4, e_z4 = C4.base_vectors()
+    # these should simplify to the above values
+    assert e_r4.diff(t).simplify() == r4 * theta4.diff(t) / sqrt(r4**2) * e_theta4
+    assert e_theta4.diff(t).simplify() == -sqrt(r4**2) * theta4.diff(t) / r4 * e_r4
+    assert e_z4.diff(t) == Vector.zero
+
+    # using a lambda transformation
+    # with parent system and not time symbol
+    Cart = CoordSys3D("Cart")
+    C5 = Cart.create_new(
+        "C5",
+        transformation=lambda r, theta, z: (
+            r*cos(theta),
+            r*sin(theta),
+            z),
+        time_symbol=None)
+    assert all(s.diff(t) == 0 for s in C5.base_scalars())
+    assert all(v.diff(t) == Vector.zero for v in C5.base_vectors())
+
+
+def test_spherical_system_base_vector_derivative_of_time():
+    t = symbols("t")
+
+    # using a predefined transformation with no time symbol and
+    # no parent system -> time derivative evaluates to zero
+    C0 = CoordSys3D("C0", transformation="spherical")
+    assert all(s.diff(t) == 0 for s in C0.base_scalars())
+    assert all(v.diff(t) == Vector.zero for v in C0.base_vectors())
+
+    # predefined transformation with no parent system, with time symbol
+    C1 = CoordSys3D("C1", transformation="spherical", time_symbol=t)
+    assert all(s.diff(t) != 0 for s in C1.base_scalars())
+
+    r, theta, phi = C1.base_scalars()
+    e_r, e_theta, e_phi = C1.base_vectors()
+    r_d, theta_d, phi_d = [f.diff(t) for f in [r, theta, phi]]
+    r_dd, theta_dd, phi_dd = [f.diff(t, 2) for f in [r, theta, phi]]
+
+    # first time derivative
+    assert e_r.diff(t) == (
+        theta_d * e_theta + phi_d * sin(theta) * e_phi)
+    assert e_theta.diff(t) == (
+        -theta_d * e_r + phi_d * cos(theta) * e_phi)
+    assert e_phi.diff(t) == (
+        -phi_d * sin(theta) * e_r - phi_d * cos(theta) * e_theta)
+
+    # second time derivative
+    assert e_r.diff(t, 2) == (
+        (-theta_d**2 - phi_d**2 * sin(theta)**2) * e_r +
+        (theta_dd - phi_d**2 * sin(theta) * cos(theta)) * e_theta +
+        (phi_dd * sin(theta) + 2 * theta_d * phi_d * cos(theta)) * e_phi)
+    assert e_theta.diff(t, 2) == (
+        (-theta_dd - phi_d**2 * sin(theta) * cos(theta)) * e_r +
+        (-theta_d**2 - phi_d**2 * cos(theta)**2) * e_theta +
+        (phi_dd * cos(theta) - 2 * theta_d * phi_d * sin(theta)) * e_phi)
+    assert e_phi.diff(t, 2) == (
+        (-phi_dd * sin(theta)) * e_r +
+        (-phi_dd * cos(theta)) * e_theta +
+        (-phi_d**2 * sin(theta)**2 - phi_d**2 * cos(theta)**2) * e_phi)
+    assert e_phi.diff(t, 2).simplify() == (
+        (-phi_dd * sin(theta)) * e_r +
+        (-phi_dd * cos(theta)) * e_theta +
+        -phi_d**2 * e_phi)
+
+    # using a lambda transformation, with time symbol, with parent system
+    Cart = CoordSys3D("Cart")
+    C2 = Cart.create_new(
+        "C2",
+        transformation=lambda r, theta, phi: (
+            r * sin(theta) * cos(phi),
+            r * sin(theta) * sin(phi),
+            r * cos(theta)
+        ),
+        time_symbol=t)
+    assert all(s.diff(t) != 0 for s in C2.base_scalars())
+    r2, theta2, phi2 = C2.base_scalars()
+    r2_d, theta2_d, phi2_d = [f.diff(t) for f in [r2, theta2, phi2]]
+    e_r2, e_theta2, e_phi2 = C2.base_vectors()
+    # NOTE: the unsimplified result are very long. In some case, the
+    # simplified result still needs to be simplified further in order
+    # to bring it to a form in which, after manual simplification,
+    # we can definitely say that the result is correct
+    assert e_r2.diff(t).simplify() == (
+        theta2_d * r2 / sqrt(r2**2) * e_theta2 +
+        r2 * sin(theta2)**2 * phi2_d / sqrt(r2**2 * sin(theta2)**2) * e_phi2)
+    de_theta2 = e_theta2.diff(t)
+    assert (de_theta2 & e_r2).simplify() == -theta2_d * sqrt(r2**2) / r2
+    assert (de_theta2 & e_theta2).simplify() == 0
+    last_component = (de_theta2 & e_phi2).simplify()
+    assert TR6(TR5(TR11(last_component)).collect(2)) == (
+        phi2.diff(t) * sqrt(r2**2) * sin(theta2) * cos(theta2) / sqrt(r2**2 * sin(theta2)**2))
+    assert e_phi2.diff(t).simplify() == (
+        -sqrt(r2**2 * sin(theta2)**2) * phi2_d / r2 * e_r2 +
+        -sqrt(r2**2 * sin(theta2)**2) * phi2_d / sqrt(r2**2) / tan(theta2) * e_theta2
+    )
+
+     # using a lambda transformation, with no time symbol, with parent system
+    C3 = Cart.create_new(
+        "C3",
+        transformation=lambda r, theta, phi: (
+            r * sin(theta) * cos(phi),
+            r * sin(theta) * sin(phi),
+            r * cos(theta)
+        ),
+        time_symbol=None)
+    assert all(s.diff(t) == 0 for s in C3.base_scalars())
+    assert all(v.diff(t) == Vector.zero for v in C3.base_vectors())
+
+    # coordinate system with lambda, with time symbol, and without parent
+    C4 = CoordSys3D(
+        "C4",
+        transformation=lambda r, theta, phi: (
+            r * sin(theta) * cos(phi),
+            r * sin(theta) * sin(phi),
+            r * cos(theta)
+        ),
+        time_symbol=t)
+    assert all(s.diff(t) != 0 for s in C4.base_scalars())
+    e_r4, e_theta4, e_z4 = C4.base_vectors()
+    raises(ValueError, lambda: e_r4.diff(t))
+    raises(ValueError, lambda: e_theta4.diff(t))
+    raises(ValueError, lambda: e_z4.diff(t))

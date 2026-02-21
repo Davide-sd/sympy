@@ -167,8 +167,9 @@ class BasisDependent(Expr):
         for x in args:
             if isinstance(x, BasisDependent):
                 raise TypeError("Invalid arg for differentiation")
-        diff_components = [df(v, *args, **kwargs) * k for
-                           k, v in self.components.items()]
+        diff_components = [
+            df(v, *args, **kwargs) * k + v * df(k, *args, **kwargs)
+            for k, v in self.components.items()]
         return self._add_func(*diff_components)
 
     diff.__doc__ += df.__doc__  # type: ignore

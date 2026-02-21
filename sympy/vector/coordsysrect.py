@@ -150,6 +150,12 @@ class CoordSys3D(Basic):
             return self.args[1].name
         return self.args[1]
 
+    @property
+    def time_symbol(self):
+        if not isinstance(self.args[-1], BooleanFalse):
+            return self.args[-1]
+        return None
+
     @staticmethod
     def _create_base_vectors(system, vector_names):
         base_vectors = [
@@ -796,8 +802,10 @@ class CoordSys3D(Basic):
         current = {k: post_process(v) for k, v in current.items()}
         return current
 
-    def locate_new(self, name, position, vector_names=None,
-                   variable_names=None):
+    def locate_new(
+        self, name, position, vector_names=None, variable_names=None,
+        time_symbol=None
+    ):
         """
         Returns a CoordSys3D with its origin located at the given
         position wrt this coordinate system's origin.
@@ -835,10 +843,12 @@ class CoordSys3D(Basic):
         return CoordSys3D(name, location=position,
                           vector_names=vector_names,
                           variable_names=variable_names,
-                          parent=self)
+                          parent=self, time_symbol=time_symbol)
 
-    def orient_new(self, name, orienters, location=None,
-                   vector_names=None, variable_names=None):
+    def orient_new(
+        self, name, orienters, location=None,
+        vector_names=None, variable_names=None, time_symbol=None
+    ):
         """
         Creates a new CoordSys3D oriented in the user-specified way
         with respect to this system.
@@ -930,10 +940,13 @@ class CoordSys3D(Basic):
                           vector_names=vector_names,
                           variable_names=variable_names,
                           location=location,
-                          parent=self)
+                          parent=self, time_symbol=time_symbol)
 
-    def orient_new_axis(self, name, angle, axis, location=None,
-                        vector_names=None, variable_names=None):
+    def orient_new_axis(
+        self, name, angle, axis, location=None,
+        vector_names=None, variable_names=None,
+        time_symbol=None
+    ):
         """
         Axis rotation is a rotation about an arbitrary axis by
         some angle. The angle is supplied as a SymPy expr scalar, and
@@ -980,11 +993,15 @@ class CoordSys3D(Basic):
         return self.orient_new(name, orienter,
                                location=location,
                                vector_names=vector_names,
-                               variable_names=variable_names)
+                               variable_names=variable_names,
+                               time_symbol=time_symbol)
 
-    def orient_new_body(self, name, angle1, angle2, angle3,
-                        rotation_order, location=None,
-                        vector_names=None, variable_names=None):
+    def orient_new_body(
+        self, name, angle1, angle2, angle3,
+        rotation_order, location=None,
+        vector_names=None, variable_names=None,
+        time_symbol=None
+    ):
         """
         Body orientation takes this coordinate system through three
         successive simple rotations.
@@ -1051,11 +1068,15 @@ class CoordSys3D(Basic):
         return self.orient_new(name, orienter,
                                location=location,
                                vector_names=vector_names,
-                               variable_names=variable_names)
+                               variable_names=variable_names,
+                               time_symbol=time_symbol)
 
-    def orient_new_space(self, name, angle1, angle2, angle3,
-                         rotation_order, location=None,
-                         vector_names=None, variable_names=None):
+    def orient_new_space(
+        self, name, angle1, angle2, angle3,
+        rotation_order, location=None,
+        vector_names=None, variable_names=None,
+        time_symbol=None
+    ):
         """
         Space rotation is similar to Body rotation, but the rotations
         are applied in the opposite order.
@@ -1116,10 +1137,14 @@ class CoordSys3D(Basic):
         return self.orient_new(name, orienter,
                                location=location,
                                vector_names=vector_names,
-                               variable_names=variable_names)
+                               variable_names=variable_names,
+                               time_symbol=time_symbol)
 
-    def orient_new_quaternion(self, name, q0, q1, q2, q3, location=None,
-                              vector_names=None, variable_names=None):
+    def orient_new_quaternion(
+        self, name, q0, q1, q2, q3, location=None,
+        vector_names=None, variable_names=None,
+        time_symbol=None
+    ):
         """
         Quaternion orientation orients the new CoordSys3D with
         Quaternions, defined as a finite rotation about lambda, a unit
@@ -1171,9 +1196,13 @@ class CoordSys3D(Basic):
         return self.orient_new(name, orienter,
                                location=location,
                                vector_names=vector_names,
-                               variable_names=variable_names)
+                               variable_names=variable_names,
+                               time_symbol=time_symbol)
 
-    def create_new(self, name, transformation, variable_names=None, vector_names=None):
+    def create_new(
+        self, name, transformation, variable_names=None, vector_names=None,
+        time_symbol=None
+    ):
         """
         Returns a CoordSys3D which is connected to self by transformation.
 
@@ -1204,8 +1233,13 @@ class CoordSys3D(Basic):
         (sqrt(a.x**2 + a.y**2 + a.z**2), acos(a.z/sqrt(a.x**2 + a.y**2 + a.z**2)), atan2(a.y, a.x))
 
         """
-        return CoordSys3D(name, parent=self, transformation=transformation,
-                          variable_names=variable_names, vector_names=vector_names)
+        return CoordSys3D(
+            name,
+            parent=self,
+            transformation=transformation,
+            variable_names=variable_names,
+            vector_names=vector_names,
+            time_symbol=time_symbol)
 
     def __init__(self, name, location=None, rotation_matrix=None,
                  parent=None, vector_names=None, variable_names=None,
