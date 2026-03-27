@@ -1,5 +1,7 @@
 from __future__ import annotations
 from sympy.core.numbers import I, pi
+from sympy.functions.elementary.miscellaneous import sqrt
+from sympy.functions.elementary.complexes import re, im
 from sympy.functions.elementary.exponential import (exp, log)
 from sympy.polys.partfrac import apart
 from sympy.core.symbol import Dummy
@@ -748,7 +750,8 @@ def bode_magnitude_numerical_data(system, initial_exp=-5, final_exp=5, freq_unit
         repl = I*_w
     w_expr = expr.subs({system.var: repl})
 
-    mag = 20*log(Abs(w_expr), 10)
+    mag = sqrt(re(w_expr)**2 + im(w_expr)**2)
+    mag = 20*log(mag, 10)
 
     x, y = LineOver1DRangeSeries(mag,
         (_w, 10**initial_exp, 10**final_exp), xscale='log', **kwargs).get_points()
